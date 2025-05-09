@@ -16,6 +16,8 @@ class Application {
     void loop();
     
   private:
+    bool _calibration_by_serial; // Новый флаг
+
     static const uint16_t MAX_VOLUME = 4095;
     static const uint32_t TRIM_PITCH_FACTOR = 33554432;
     static const uint32_t FREQ_FACTOR = 1600000000;
@@ -33,7 +35,7 @@ class Application {
 
     
 #if SERIAL_ENABLED    
-    static const int BAUD = 115200;
+    static const int BAUD = 9600;
 #endif
 
     AppState _state;

@@ -26,7 +26,8 @@ static int32_t volCalibrationBase   = 0;
 
 Application::Application()
   : _state(PLAYING),
-    _mode(NORMAL) {
+    _mode(NORMAL),
+    _calibration_by_serial(false) { // Инициализация флага 
 };
 
 void Application::setup() {
@@ -167,6 +168,7 @@ void Application::loop() {
   uint8_t registerValue = 2;
   uint16_t tmpVolume;
 
+
   mloop:                   // Main loop avoiding the GCC "optimization"
 
   pitchPotValue    = analogRead(PITCH_POT);
@@ -194,19 +196,26 @@ void Application::loop() {
 
   if (_state == PLAYING && HW_BUTTON_PRESSED) {
     _state = CALIBRATING;
+    _calibration_by_serial = false;
     resetTimer();
   }
 
+  // Логика для HW_BUTTON_RELEASED, ИЗМЕНЕНА с учетом флага
   if (_state == CALIBRATING && HW_BUTTON_RELEASED) {
-    if (timerExpired(1500)) {
-     
-         _mode = nextMode();
- if (_mode==NORMAL) {HW_LED1_ON;HW_LED2_OFF;} else {HW_LED1_OFF;HW_LED2_ON;};
-   // playModeSettingSound();
-   
-   
+    if (!_calibration_by_serial) { // Эта логика активна только если калибровка НЕ по Serial
+      if (timerExpired(1500) && !timerExpired(15000)) { 
+           _mode = nextMode();
+           if (_mode==NORMAL) {HW_LED1_ON;HW_LED2_OFF;} else {HW_LED1_OFF;HW_LED2_ON;};
+           Serial.println("Короткое нажатие: режим MUTE/NORMAL изменен.");
+           _state = PLAYING; 
+      } else if (!timerExpired(15000)) {
+        // Опционально: если кнопка отпущена очень быстро, можно отменить калибровку кнопкой.
+        // Если вы хотите, чтобы быстрое отпускание кнопки всегда прерывало калибровку (начатую кнопкой),
+        // можно раскомментировать следующие строки:
+        // Serial.println("Калибровка кнопкой отменена (кнопка отпущена).");
+        // _state = PLAYING;
+      }
     }
-    _state = PLAYING;
   };
 
   if (_state == CALIBRATING && timerExpired(15000)) {
@@ -225,12 +234,9 @@ void Application::loop() {
   playCalibratingCountdownSound();
   calibrate();
   
-  
-      
-      
-
       _mode=NORMAL;
       HW_LED2_OFF;
+      _calibration_by_serial = false;
       
     while (HW_BUTTON_PRESSED)
       ; // NOP
@@ -242,11 +248,42 @@ void Application::loop() {
 #endif
 
 #if SERIAL_ENABLED
-  if (timerExpired(TICKS_100_MILLIS)) {
-    resetTimer();
-    Serial.write(pitch & 0xff);              // Send char on serial (if used)
-    Serial.write((pitch >> 8) & 0xff);
+  // Проверка команды на калибровку через Serial
+  if (Serial.available() > 0) {
+    char command = Serial.read();
+    if (command == 'c') { // 'c' - команда для старта калибровки
+      if (_state == PLAYING) {
+        Serial.println("Получена команда на калибровку ('c'). Начало калибровки...");
+        _state = CALIBRATING;
+        _calibration_by_serial = true; 
+        resetTimer();   
+      } else {
+        Serial.println("Команда калибровки ('c') проигнорирована: терменвокс не в режиме PLAYING.");
+      }
+    }
+    while(Serial.available() > 0) { // Очистим буфер от остальных символов, если они есть
+      Serial.read();
+    }
   }
+#endif
+
+#if SERIAL_ENABLED
+  if (_state == PLAYING && timerExpired(TICKS_100_MILLIS))  {
+    resetTimer();
+    uint16_t current_pitch = pitch;
+    Serial.write(current_pitch & 0xff);         // Младший байт
+    Serial.write((current_pitch >> 8) & 0xff);
+  }
+//  static bool serial_initialized_in_loop = false;
+//  if (!serial_initialized_in_loop) {
+//    Serial.begin(Application::BAUD); // Инициализация Serial здесь, если не было в setup
+ //   serial_initialized_in_loop = true;
+//  }
+
+//  uint16_t current_pitch = pitch; 
+//  Serial.print("LOOP_V2: pitch = ");
+//  Serial.print(current_pitch);
+//  Serial.println(); // Упростим вывод, уберем байты пока
 #endif
 
   if (pitchValueAvailable) {                        // If capture event
@@ -333,7 +370,7 @@ static long pitchfn0 = 0;
 static long pitchfn1 = 0;
 static long pitchfn = 0;
 
-  Serial.begin(115200);
+  Serial.begin(9600);
   Serial.println("\nPITCH CALIBRATION\n");
 
   HW_LED1_OFF;
@@ -420,7 +457,7 @@ static long volumefn0 = 0;
 static long volumefn1 = 0;
 static long volumefn = 0;
 
-    Serial.begin(115200);
+    Serial.begin(9600);
     Serial.println("\nVOLUME CALIBRATION");
     
   InitialiseVolumeMeasurement();
